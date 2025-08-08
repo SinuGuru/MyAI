@@ -72,5 +72,4 @@ for entry in st.session_state["history"]:
         )
 
 # Fixed line with proper newline
-st.markdown(f"---
-**Total Tokens Used in this session:** {st.session_state['token_total']}")
+st.markdown(f"---**Total Tokens Used in this session:** {st.session_state['token_total']}")
