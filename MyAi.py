@@ -109,4 +109,4 @@ if st.button("Send") and user_input:
     })
     st.session_state["token_total"] += usage.total_tokens
     st.session_state["user_input"] = ""
-    st.experimental_rerun()
+    # st.experimental_rerun()
