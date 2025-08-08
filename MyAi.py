@@ -1,7 +1,7 @@
 import streamlit as st
 import openai
 
-st.title("💬 Chatbot (Model Picker + Token Counter)")
+st.title("💬 ChatGPT Chatbot (Model Picker + Token Counter)")
 
 client = openai.OpenAI(api_key=st.secrets["OPENAI_API_KEY"])  # For Streamlit Cloud or paste your key directly
 
@@ -18,10 +18,13 @@ model_label = st.selectbox(
 )
 model = MODEL_OPTIONS[model_label]
 
+# Initialize session state
 if "history" not in st.session_state:
     st.session_state["history"] = []
 if "token_total" not in st.session_state:
     st.session_state["token_total"] = 0
+if "user_input" not in st.session_state:
+    st.session_state["user_input"] = ""
 
 def chat_with_openai(prompt, chat_history, model):
     messages = [{"role": entry["role"], "content": entry["content"]} for entry in chat_history]
@@ -39,13 +42,13 @@ user_input = st.text_input("You:", key="user_input")
 
 if st.button("Send") or user_input:
     if user_input:
-        st.session_state.history.append({
+        st.session_state["history"].append({
             "role": "user",
             "content": user_input,
             "model": model
         })
-        response, usage = chat_with_openai(user_input, st.session_state.history, model)
-        st.session_state.history.append({
+        response, usage = chat_with_openai(user_input, st.session_state["history"], model)
+        st.session_state["history"].append({
             "role": "assistant",
             "content": response,
             "model": model,
@@ -53,11 +56,11 @@ if st.button("Send") or user_input:
             "output_tokens": usage.completion_tokens,
             "total_tokens": usage.total_tokens
         })
-        st.session_state.token_total += usage.total_tokens
+        st.session_state["token_total"] += usage.total_tokens
         st.session_state["user_input"] = ""
 
 # Display chat history with token usage
-for entry in st.session_state.history:
+for entry in st.session_state["history"]:
     if entry["role"] == "user":
         st.markdown(f"**You:** {entry['content']} _(Model: {MODEL_OPTIONS.get(entry.get('model', ''), '')})_")
     elif entry["role"] == "assistant":
@@ -70,4 +73,4 @@ for entry in st.session_state.history:
             unsafe_allow_html=True
         )
 
-st.markdown(f"---\n**Total Tokens Used in this session:** {st.session_state.token_total}")
+st.markdown(f"---\n**Total Tokens Used in this session:** {st.session_state['token_total']}")
