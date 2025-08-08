@@ -67,7 +67,29 @@ def reset_chat():
     st.session_state["token_total"] = 0
 st.button("🔁 Reset Chat", on_click=reset_chat)
 
-# --- Chat Input (at bottom, 2025-proof) ---
+# --- Chat History (above input) ---
+for entry in st.session_state["history"]:
+    if entry["role"] == "user":
+        st.markdown(f"**You:** {entry['content']}")
+    elif entry["role"] == "assistant":
+        tokens_info = f"Input: {entry.get('input_tokens', '?')}, Output: {entry.get('output_tokens', '?')}, Total: {entry.get('total_tokens', '?')}"
+        cost = estimate_cost(entry.get("model", ""), entry.get("input_tokens", 0), entry.get("output_tokens", 0))
+        st.markdown(
+            f"**AI ({entry['model']}):** {entry['content']}\n"
+            f"<span style='color:gray;font-size:small;'>Tokens – {tokens_info}<br>Estimated Cost: ${cost}</span>",
+            unsafe_allow_html=True
+        )
+st.markdown(f"---\n**Total Tokens Used:** {st.session_state['token_total']}")
+
+# --- Scroll to bottom on every rerun ---
+st.markdown("""
+    <script>
+        var chatDiv = window.parent.document.querySelector('.main');
+        if(chatDiv){ chatDiv.scrollTop = chatDiv.scrollHeight; }
+    </script>
+""", unsafe_allow_html=True)
+
+# --- Chat Input (always at very bottom) ---
 user_input = st.text_input("You:", key="user_input_box")
 send = st.button("Send")
 
@@ -92,18 +114,4 @@ if send and user_input:
         "total_tokens": usage.total_tokens
     })
     st.session_state["token_total"] += usage.total_tokens
-    # DO NOT assign to widget key! Let the user clear the box for next message.
-
-# --- Chat History (always shows up-to-date, before input) ---
-for entry in st.session_state["history"]:
-    if entry["role"] == "user":
-        st.markdown(f"**You:** {entry['content']}")
-    elif entry["role"] == "assistant":
-        tokens_info = f"Input: {entry.get('input_tokens', '?')}, Output: {entry.get('output_tokens', '?')}, Total: {entry.get('total_tokens', '?')}"
-        cost = estimate_cost(entry.get("model", ""), entry.get("input_tokens", 0), entry.get("output_tokens", 0))
-        st.markdown(
-            f"**AI ({entry['model']}):** {entry['content']}\n"
-            f"<span style='color:gray;font-size:small;'>Tokens – {tokens_info}<br>Estimated Cost: ${cost}</span>",
-            unsafe_allow_html=True
-        )
-st.markdown(f"---\n**Total Tokens Used:** {st.session_state['token_total']}")
+    # Do not clear input (2025-safe)!
