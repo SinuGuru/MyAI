@@ -1,9 +1,9 @@
 import streamlit as st
 import openai
 
-st.title("💬Chatbot (Model Picker + Token Counter)")
+st.title("💬 ChatGPT Chatbot (Model Picker + Token Counter)")
 
-client = openai.OpenAI(api_key=st.secrets["OPENAI_API_KEY"])  # For Streamlit Cloud or paste your key directly
+client = openai.OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
 MODEL_OPTIONS = {
     "GPT-3.5 Turbo": "gpt-3.5-turbo",
@@ -23,8 +23,8 @@ if "history" not in st.session_state:
     st.session_state["history"] = []
 if "token_total" not in st.session_state:
     st.session_state["token_total"] = 0
-if "user_input" not in st.session_state:
-    st.session_state["user_input"] = ""
+
+user_input = st.text_input("You:", key="user_input")
 
 def chat_with_openai(prompt, chat_history, model):
     messages = [{"role": entry["role"], "content": entry["content"]} for entry in chat_history]
@@ -37,8 +37,6 @@ def chat_with_openai(prompt, chat_history, model):
     answer = response.choices[0].message.content
     usage = response.usage
     return answer, usage
-
-user_input = st.text_input("You:", key="user_input")
 
 if st.button("Send") or user_input:
     if user_input:
@@ -57,15 +55,15 @@ if st.button("Send") or user_input:
             "total_tokens": usage.total_tokens
         })
         st.session_state["token_total"] += usage.total_tokens
-        st.session_state["user_input"] = ""
+        st.experimental_rerun()  # Refresh the app to clear input
 
-# Display chat history with token usage
+# Display chat history
 for entry in st.session_state["history"]:
     if entry["role"] == "user":
         st.markdown(f"**You:** {entry['content']} _(Model: {MODEL_OPTIONS.get(entry.get('model', ''), '')})_")
     elif entry["role"] == "assistant":
-        model_used = [k for k, v in MODEL_OPTIONS.items() if v == entry.get('model', '')]
-        model_used = model_used[0] if model_used else entry.get('model', '')
+        model_used = [k for k, v in MODEL_OPTIONS.items() if v == entry.get("model", "")]
+        model_used = model_used[0] if model_used else entry.get("model", "")
         tokens_info = f"Input: {entry.get('input_tokens', '?')}, Output: {entry.get('output_tokens', '?')}, Total: {entry.get('total_tokens', '?')}"
         st.markdown(
             f"**ChatGPT ({model_used}):** {entry['content']}"
