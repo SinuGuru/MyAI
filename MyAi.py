@@ -54,6 +54,8 @@ if "history" not in st.session_state:
     st.session_state["history"] = []
 if "token_total" not in st.session_state:
     st.session_state["token_total"] = 0
+if "user_input_box" not in st.session_state:
+    st.session_state["user_input_box"] = ""
 
 # --- File Upload ---
 file_content = ""
@@ -65,11 +67,11 @@ if uploaded_file:
 def reset_chat():
     st.session_state["history"] = []
     st.session_state["token_total"] = 0
-    st.session_state["user_input"] = ""
+    st.session_state["user_input_box"] = ""
 st.button("🔁 Reset Chat", on_click=reset_chat)
 
-# --- Chat Input (at bottom) ---
-user_input = st.text_input("You:", value=st.session_state.get("user_input", ""), key="user_input_box")
+# --- Chat Input (at bottom, always safe) ---
+user_input = st.text_input("You:", value=st.session_state["user_input_box"], key="user_input_box")
 send = st.button("Send")
 
 # --- OpenAI Client and Chat ---
@@ -93,8 +95,7 @@ if send and user_input:
         "total_tokens": usage.total_tokens
     })
     st.session_state["token_total"] += usage.total_tokens
-    # Clear local and session input for the next round
-    st.session_state["user_input_box"] = ""
+    st.session_state["user_input_box"] = ""  # This is always safe now!
     user_input = ""
 
 # --- Chat History (always shows up-to-date, before input) ---
