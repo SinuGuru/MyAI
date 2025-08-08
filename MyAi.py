@@ -1,7 +1,7 @@
 import streamlit as st
 import openai
 
-st.title("💬 ChatGPT Chatbot (Model Picker + Token Counter)")
+st.title("💬Chatbot (Model Picker + Token Counter)")
 
 client = openai.OpenAI(api_key=st.secrets["OPENAI_API_KEY"])  # For Streamlit Cloud or paste your key directly
 
