@@ -102,7 +102,8 @@ if st.button("Send") or user_input:
             "total_tokens": usage.total_tokens
         })
         st.session_state["token_total"] += usage.total_tokens
-        st.experimental_rerun()
+        st.session_state["user_intput"] = ""
+        st.stop()
 
 # --- Chat History ---
 for entry in st.session_state["history"]:
