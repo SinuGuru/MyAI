@@ -55,7 +55,7 @@ if st.button("Send") or user_input:
             "total_tokens": usage.total_tokens
         })
         st.session_state["token_total"] += usage.total_tokens
-        st.experimental_rerun()  # Refresh the app to clear input
+        # No rerun here
 
 # Display chat history
 for entry in st.session_state["history"]:
@@ -71,4 +71,6 @@ for entry in st.session_state["history"]:
             unsafe_allow_html=True
         )
 
-st.markdown(f"---\n**Total Tokens Used in this session:** {st.session_state['token_total']}")
+# Fixed line with proper newline
+st.markdown(f"---
+**Total Tokens Used in this session:** {st.session_state['token_total']}")
