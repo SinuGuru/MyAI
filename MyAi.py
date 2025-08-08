@@ -1,7 +1,7 @@
 import streamlit as st
 import openai
 
-st.title("💬 ChatGPT Chatbot (Model Picker + Token Counter)")
+st.title("💬 Chatbot (Model Picker + Token Counter)")
 
 client = openai.OpenAI(api_key=st.secrets["OPENAI_API_KEY"])  # For Streamlit Cloud or paste your key directly
 
@@ -54,7 +54,7 @@ if st.button("Send") or user_input:
             "total_tokens": usage.total_tokens
         })
         st.session_state.token_total += usage.total_tokens
-        st.session_state.user_input = ""
+        st.session_state["user_input"] = ""
 
 # Display chat history with token usage
 for entry in st.session_state.history:
