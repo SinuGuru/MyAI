@@ -76,7 +76,8 @@ if uploaded_file:
 if st.button("🔁 Reset Chat"):
     st.session_state["history"] = []
     st.session_state["token_total"] = 0
-    st.experimental_rerun()
+    st.session_state["user_intput"] = ""
+    st.stop()
 
 # --- Chat Input ---
 user_input = st.text_input("You:", key="user_input")
