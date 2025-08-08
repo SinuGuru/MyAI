@@ -81,12 +81,12 @@ if uploaded_file:
 
 # --- Reset Button ---
 if st.button("🔁 Reset Chat"):
-    st.session_state["history"] = []
-    st.session_state["token_total"] = 0
-    st.session_state["user_input"] = ""
-    st.stop()
+    st.session_state.clear()
+    st.experimental_rerun()
 
 # --- Chat Input ---
+
+# --- Chat Input Moved Below ---
 user_input = st.text_input("You:", key="user_input")
 
 def chat_with_openai(prompt, chat_history, model):
