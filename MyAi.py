@@ -22,7 +22,7 @@ with st.sidebar:
         ])
         st.download_button("⬇️ Download Chat History", data=history_text, file_name="chat_history.txt")
 
-# --- Apply CSS for theme ---
+# --- Apply CSS for theme (partial, main area and input) ---
 if st.session_state["theme"] == "dark":
     st.markdown("""
     <style>
@@ -54,8 +54,6 @@ if "history" not in st.session_state:
     st.session_state["history"] = []
 if "token_total" not in st.session_state:
     st.session_state["token_total"] = 0
-if "user_input" not in st.session_state:
-    st.session_state["user_input"] = ""
 
 # --- File Upload ---
 file_content = ""
@@ -70,25 +68,12 @@ def reset_chat():
     st.session_state["user_input"] = ""
 st.button("🔁 Reset Chat", on_click=reset_chat)
 
-# --- Chat History (before input for bottom effect) ---
-for entry in st.session_state["history"]:
-    if entry["role"] == "user":
-        st.markdown(f"**You:** {entry['content']}")
-    elif entry["role"] == "assistant":
-        tokens_info = f"Input: {entry.get('input_tokens', '?')}, Output: {entry.get('output_tokens', '?')}, Total: {entry.get('total_tokens', '?')}"
-        cost = estimate_cost(entry.get("model", ""), entry.get("input_tokens", 0), entry.get("output_tokens", 0))
-        st.markdown(
-            f"**AI ({entry['model']}):** {entry['content']}\n"
-            f"<span style='color:gray;font-size:small;'>Tokens – {tokens_info}<br>Estimated Cost: ${cost}</span>",
-            unsafe_allow_html=True
-        )
-st.markdown(f"---\n**Total Tokens Used:** {st.session_state['token_total']}")
-
-# --- Chat Input (always at bottom) ---
-user_input = st.text_input("You:", value=st.session_state["user_input"], key="user_input_box")
+# --- Chat Input (at bottom) ---
+user_input = st.text_input("You:", value=st.session_state.get("user_input", ""), key="user_input_box")
+send = st.button("Send")
 
 # --- OpenAI Client and Chat ---
-if st.button("Send") and user_input:
+if send and user_input:
     st.session_state["history"].append({"role": "user", "content": user_input, "model": model})
     client = openai.OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
     def chat_with_openai(prompt, chat_history, model):
@@ -108,5 +93,20 @@ if st.button("Send") and user_input:
         "total_tokens": usage.total_tokens
     })
     st.session_state["token_total"] += usage.total_tokens
-    st.session_state["user_input"] = ""
-    # st.experimental_rerun()
+    # Clear local and session input for the next round
+    st.session_state["user_input_box"] = ""
+    user_input = ""
+
+# --- Chat History (always shows up-to-date, before input) ---
+for entry in st.session_state["history"]:
+    if entry["role"] == "user":
+        st.markdown(f"**You:** {entry['content']}")
+    elif entry["role"] == "assistant":
+        tokens_info = f"Input: {entry.get('input_tokens', '?')}, Output: {entry.get('output_tokens', '?')}, Total: {entry.get('total_tokens', '?')}"
+        cost = estimate_cost(entry.get("model", ""), entry.get("input_tokens", 0), entry.get("output_tokens", 0))
+        st.markdown(
+            f"**AI ({entry['model']}):** {entry['content']}\n"
+            f"<span style='color:gray;font-size:small;'>Tokens – {tokens_info}<br>Estimated Cost: ${cost}</span>",
+            unsafe_allow_html=True
+        )
+st.markdown(f"---\n**Total Tokens Used:** {st.session_state['token_total']}")
