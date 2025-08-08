@@ -3,7 +3,7 @@ import openai
 
 st.title("💬 ChatGPT Chatbot (Model Picker + Token Counter)")
 
-openai.api_key = st.secrets["OPENAI_API_KEY"]  # For Streamlit Cloud, or paste your key here for local use
+client = openai.OpenAI(api_key=st.secrets["OPENAI_API_KEY"])  # For Streamlit Cloud or paste your key directly
 
 MODEL_OPTIONS = {
     "GPT-3.5 Turbo": "gpt-3.5-turbo",
@@ -24,16 +24,15 @@ if "token_total" not in st.session_state:
     st.session_state["token_total"] = 0
 
 def chat_with_openai(prompt, chat_history, model):
-    messages = []
-    for entry in chat_history:
-        messages.append({"role": entry["role"], "content": entry["content"]})
+    messages = [{"role": entry["role"], "content": entry["content"]} for entry in chat_history]
     messages.append({"role": "user", "content": prompt})
-    response = openai.ChatCompletion.create(
+
+    response = client.chat.completions.create(
         model=model,
         messages=messages
     )
     answer = response.choices[0].message.content
-    usage = response['usage']
+    usage = response.usage
     return answer, usage
 
 user_input = st.text_input("You:", key="user_input")
@@ -50,11 +49,11 @@ if st.button("Send") or user_input:
             "role": "assistant",
             "content": response,
             "model": model,
-            "input_tokens": usage["prompt_tokens"],
-            "output_tokens": usage["completion_tokens"],
-            "total_tokens": usage["total_tokens"]
+            "input_tokens": usage.prompt_tokens,
+            "output_tokens": usage.completion_tokens,
+            "total_tokens": usage.total_tokens
         })
-        st.session_state.token_total += usage["total_tokens"]
+        st.session_state.token_total += usage.total_tokens
         st.session_state.user_input = ""
 
 # Display chat history with token usage
