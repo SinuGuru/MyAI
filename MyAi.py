@@ -4,7 +4,7 @@ import openai
 
 # ---------- Page config ----------
 st.set_page_config(page_title="Chatbot", page_icon="💬", layout="centered")
-st.title("💬 ChatGPT Chatbot")
+st.title("💬 My Chatbot")
 
 # ---------- Pricing ----------
 PRICING = {
@@ -58,6 +58,8 @@ if "token_total" not in st.session_state:
     st.session_state["token_total"] = 0
 if "cost_total" not in st.session_state:
     st.session_state["cost_total"] = 0.0
+if "input_text" not in st.session_state:
+    st.session_state["input_text"] = ""
 
 # ---------- File upload ----------
 file_context = ""
@@ -77,46 +79,7 @@ if uploaded:
 # ---------- OpenAI client ----------
 client = openai.OpenAI(api_key=st.secrets.get("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY", "")))
 
-# ---------- User input ----------
-prompt = st.chat_input("Type your message… (Shift+Enter for a new line)")
-if prompt:
-    # Build messages
-    messages = []
-    if system_prompt.strip():
-        messages.append({"role": "system", "content": system_prompt.strip()})
-    if file_context:
-        messages.append({"role": "system", "content": f"Use this uploaded file as context:\n{file_context}"})
-    messages.extend({"role": m["role"], "content": m["content"]} for m in st.session_state["history"])
-    messages.append({"role": "user", "content": prompt})
-
-    # Display user message immediately
-    st.session_state["history"].append({"role": "user", "content": prompt, "model": model})
-    st.chat_message("user").markdown(prompt)
-
-    # Call OpenAI
-    try:
-        with st.spinner("Thinking…"):
-            resp = client.chat.completions.create(model=model, messages=messages)
-        reply = resp.choices[0].message.content
-        usage = resp.usage
-
-        # Store assistant reply
-        st.session_state["history"].append({
-            "role": "assistant",
-            "content": reply,
-            "model": model,
-            "input_tokens": usage.prompt_tokens,
-            "output_tokens": usage.completion_tokens,
-            "total_tokens": usage.total_tokens
-        })
-        st.session_state["token_total"] += usage.total_tokens
-        st.session_state["cost_total"] += estimate_cost(model, usage.prompt_tokens, usage.completion_tokens)
-
-        st.chat_message("assistant").markdown(reply)
-    except Exception as e:
-        st.error(f"OpenAI error: {e}")
-
-# ---------- Render history ----------
+# ---------- Render chat history ----------
 for msg in st.session_state["history"]:
     if msg["role"] == "user":
         st.chat_message("user").markdown(msg["content"])
@@ -130,6 +93,61 @@ for msg in st.session_state["history"]:
             )
             cost = estimate_cost(msg.get("model",""), msg.get("input_tokens",0), msg.get("output_tokens",0))
             st.markdown(f"<span style='color:gray;font-size:12px'>{small} · est. cost: ${cost}</span>", unsafe_allow_html=True)
+
+# ---------- Custom shrinking message box ----------
+with st.form("chat_form", clear_on_submit=True):
+    st.markdown("""
+    <textarea id="dynamic-input" name="message" placeholder="Type your message..."
+    style="width:100%; min-height:40px; resize:none; overflow:hidden; padding:8px; font-size:16px;"></textarea>
+    <script>
+    const ta = document.getElementById('dynamic-input');
+    ta.addEventListener('input', () => {
+        ta.style.height = '40px';
+        ta.style.height = (ta.scrollHeight) + 'px';
+    });
+    </script>
+    """, unsafe_allow_html=True)
+
+    submitted = st.form_submit_button("Send")
+    if submitted:
+        # Retrieve message from HTML element via JS workaround
+        # Here we just simulate reading the value from a form field:
+        msg = st.session_state.get("message", "").strip()
+
+        if msg:
+            st.session_state["history"].append({"role": "user", "content": msg, "model": model})
+            st.chat_message("user").markdown(msg)
+
+            # Build messages for OpenAI
+            messages = []
+            if system_prompt.strip():
+                messages.append({"role": "system", "content": system_prompt.strip()})
+            if file_context:
+                messages.append({"role": "system", "content": f"Use this uploaded file as context:\n{file_context}"})
+            messages.extend({"role": m["role"], "content": m["content"]} for m in st.session_state["history"] if m["role"] != "assistant" or m["content"] != msg)
+            messages.append({"role": "user", "content": msg})
+
+            # Call OpenAI
+            try:
+                with st.spinner("Thinking…"):
+                    resp = client.chat.completions.create(model=model, messages=messages)
+                reply = resp.choices[0].message.content
+                usage = resp.usage
+
+                st.session_state["history"].append({
+                    "role": "assistant",
+                    "content": reply,
+                    "model": model,
+                    "input_tokens": usage.prompt_tokens,
+                    "output_tokens": usage.completion_tokens,
+                    "total_tokens": usage.total_tokens
+                })
+                st.session_state["token_total"] += usage.total_tokens
+                st.session_state["cost_total"] += estimate_cost(model, usage.prompt_tokens, usage.completion_tokens)
+
+                st.chat_message("assistant").markdown(reply)
+            except Exception as e:
+                st.error(f"OpenAI error: {e}")
 
 # ---------- Totals ----------
 st.markdown(
