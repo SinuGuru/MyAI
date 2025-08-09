@@ -1,6 +1,7 @@
 import streamlit as st
 import openai
 
+st.set_page_config(page_title="Chatbot", page_icon="💬", layout="centered")
 st.title("💬 ChatGPT Chatbot")
 
 # --- Sidebar: Model Selector + Download ---
@@ -16,7 +17,8 @@ with st.sidebar:
 
     if st.session_state.get("history"):
         history_text = "\n\n".join(
-            [f"You: {m['content']}" if m["role"] == "user" else f"AI: {m['content']}" for m in st.session_state["history"]]
+            [f"You: {m['content']}" if m["role"] == "user" else f"AI: {m['content']}"
+             for m in st.session_state["history"]]
         )
         st.download_button("⬇️ Download Chat History", data=history_text, file_name="chat_history.txt")
 
@@ -36,9 +38,8 @@ if "history" not in st.session_state:
     st.session_state["history"] = []
 if "token_total" not in st.session_state:
     st.session_state["token_total"] = 0
-# Rotating key to clear input safely (2025-proof)
-if "input_key" not in st.session_state:
-    st.session_state["input_key"] = 0
+if "input_value" not in st.session_state:
+    st.session_state["input_value"] = ""
 
 # --- File Upload (code/text) ---
 file_content = ""
@@ -67,42 +68,53 @@ st.markdown(f"---\n**Total Tokens Used:** {st.session_state['token_total']}")
 def reset_chat():
     st.session_state["history"] = []
     st.session_state["token_total"] = 0
-    st.session_state["input_key"] += 1  # also clears the box on next render
+    st.session_state["input_value"] = ""
 st.button("🔁 Reset Chat", on_click=reset_chat)
 
-# --- Multiline message box at the bottom (clears after send) ---
-msg = st.text_area(
-    "Message",
-    key=f"user_msg_{st.session_state['input_key']}",
-    height=110,
-    placeholder="Type your message... (Shift+Enter for new line)",
-)
+# --- Dynamic expanding message box ---
+message_html = f"""
+<textarea id="dynamic-input" name="message" placeholder="Type your message..." 
+style="width:100%; min-height:40px; resize:none; overflow:hidden; padding:8px; font-size:16px;">{st.session_state['input_value']}</textarea>
+<script>
+const ta = document.getElementById('dynamic-input');
+ta.addEventListener('input', () => {{
+    ta.style.height = 'auto';
+    ta.style.height = (ta.scrollHeight) + 'px';
+}});
+</script>
+"""
+st.markdown(message_html, unsafe_allow_html=True)
 
+# Capture message from frontend
+msg = st.session_state["input_value"]
+
+# --- Send Button ---
 send = st.button("Send")
 
-# --- OpenAI call ---
-if send and msg.strip():
-    st.session_state["history"].append({"role": "user", "content": msg, "model": model})
-    client = openai.OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+# --- Function to talk to OpenAI ---
+def chat_with_openai(prompt, chat_history, model):
+    messages = [{"role": e["role"], "content": e["content"]} for e in chat_history]
+    if file_content:
+        messages.insert(0, {"role": "system", "content": f"Use this uploaded file as context:\n{file_content}"})
+    messages.append({"role": "user", "content": prompt})
+    resp = openai.OpenAI(api_key=st.secrets["OPENAI_API_KEY"]).chat.completions.create(model=model, messages=messages)
+    return resp.choices[0].message.content, resp.usage
 
-    def chat_with_openai(prompt, chat_history, model):
-        messages = [{"role": e["role"], "content": e["content"]} for e in chat_history]
-        if file_content:
-            messages.insert(0, {"role": "system", "content": f"Use this uploaded file as context:\n{file_content}"})
-        messages.append({"role": "user", "content": prompt})
-        resp = client.chat.completions.create(model=model, messages=messages)
-        return resp.choices[0].message.content, resp.usage
-
-    reply, usage = chat_with_openai(msg, st.session_state["history"], model)
-    st.session_state["history"].append({
-        "role": "assistant",
-        "content": reply,
-        "model": model,
-        "input_tokens": usage.prompt_tokens,
-        "output_tokens": usage.completion_tokens,
-        "total_tokens": usage.total_tokens
-    })
-    st.session_state["token_total"] += usage.total_tokens
-
-    # Clear the textarea safely by rotating the key
-    st.session_state["input_key"] += 1
+# --- Handle sending ---
+if send:
+    msg = st.session_state["input_value"] = st.session_state["input_value"].strip()
+    if msg:
+        st.session_state["history"].append({"role": "user", "content": msg, "model": model})
+        with st.spinner("Thinking..."):
+            reply, usage = chat_with_openai(msg, st.session_state["history"], model)
+        st.session_state["history"].append({
+            "role": "assistant",
+            "content": reply,
+            "model": model,
+            "input_tokens": usage.prompt_tokens,
+            "output_tokens": usage.completion_tokens,
+            "total_tokens": usage.total_tokens
+        })
+        st.session_state["token_total"] += usage.total_tokens
+        st.session_state["input_value"] = ""  # clear after send
+        st.experimental_rerun()  # refresh to show AI response immediately
