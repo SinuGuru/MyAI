@@ -1,10 +1,30 @@
 import os
+import json
+from datetime import date
 import streamlit as st
 import openai
 
+# ---------- Daily usage tracking ----------
+USAGE_FILE = "daily_usage.json"
+
+def load_daily_usage():
+    if os.path.exists(USAGE_FILE):
+        with open(USAGE_FILE, "r") as f:
+            return json.load(f)
+    return {}
+
+def save_daily_usage(data):
+    with open(USAGE_FILE, "w") as f:
+        json.dump(data, f)
+
+daily_usage = load_daily_usage()
+today_str = date.today().isoformat()
+if today_str not in daily_usage:
+    daily_usage[today_str] = 0.0
+
 # ---------- Page config ----------
 st.set_page_config(page_title="Chatbot", page_icon="💬", layout="centered")
-st.title("💬 My Chatbot")
+st.title("💬 ChatGPT Chatbot")
 
 # ---------- Pricing ----------
 PRICING = {
@@ -109,6 +129,8 @@ if prompt:
         reply = resp.choices[0].message.content
         usage = resp.usage
 
+        cost_this_message = estimate_cost(model, usage.prompt_tokens, usage.completion_tokens)
+
         st.session_state["history"].append({
             "role": "assistant",
             "content": reply,
@@ -118,7 +140,11 @@ if prompt:
             "total_tokens": usage.total_tokens
         })
         st.session_state["token_total"] += usage.total_tokens
-        st.session_state["cost_total"] += estimate_cost(model, usage.prompt_tokens, usage.completion_tokens)
+        st.session_state["cost_total"] += cost_this_message
+
+        # Update daily usage
+        daily_usage[today_str] += cost_this_message
+        save_daily_usage(daily_usage)
 
         st.chat_message("assistant").markdown(reply)
     except Exception as e:
@@ -127,5 +153,6 @@ if prompt:
 # ---------- Totals ----------
 st.markdown(
     f"---\n**Session tokens:** {st.session_state['token_total']} · "
-    f"**Est. session cost:** ${round(st.session_state['cost_total'], 5)}"
+    f"**Est. session cost:** ${round(st.session_state['cost_total'], 5)} · "
+    f"**Today’s total cost:** ${round(daily_usage[today_str], 5)}"
 )
