@@ -29,15 +29,52 @@ st.title("💬 ChatGPT Chatbot")
 
 # ---------- Pricing ----------
 PRICING = {
-    "gpt-5":              {"input": 0.02,   "output": 0.06},    # placeholder pricing (adjust if needed)
+    "gpt-5":              {"input": 0.02,   "output": 0.06},    # placeholder pricing
     "gpt-4o":             {"input": 0.0005, "output": 0.0015},
     "gpt-4-turbo":        {"input": 0.01,   "output": 0.03},
     "gpt-4-1106-preview": {"input": 0.01,   "output": 0.03},
     "gpt-3.5-turbo":      {"input": 0.0005, "output": 0.0015},
 }
+
 def estimate_cost(model: str, in_tokens: int, out_tokens: int) -> float:
     p = PRICING.get(model, {"input": 0.0, "output": 0.0})
     return round((in_tokens / 1000) * p["input"] + (out_tokens / 1000) * p["output"], 5)
+
+# ---------- OpenAI API Key ----------
+OPENAI_KEY = st.secrets.get("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY", ""))
+client = openai.OpenAI(api_key=OPENAI_KEY)
+
+# ---------- Remaining balance function ----------
+@st.cache_data(ttl=120)
+def fetch_openai_remaining(api_key: str):
+    try:
+        # Dates for current month usage
+        today = date.today()
+        start_date = today.replace(day=1).strftime("%Y-%m-%d")
+        end_date = today.strftime("%Y-%m-%d")
+
+        # Get subscription details (monthly hard limit)
+        sub_url = "https://api.openai.com/v1/dashboard/billing/subscription"
+        headers = {"Authorization": f"Bearer {api_key}"}
+        sub_resp = requests.get(sub_url, headers=headers, timeout=10)
+        if sub_resp.status_code != 200:
+            return None
+        sub_data = sub_resp.json()
+        hard_limit = sub_data.get("hard_limit_usd", 0.0)
+
+        # Get usage this month
+        usage_url = f"https://api.openai.com/v1/dashboard/billing/usage?start_date={start_date}&end_date={end_date}"
+        usage_resp = requests.get(usage_url, headers=headers, timeout=10)
+        if usage_resp.status_code != 200:
+            return None
+        usage_data = usage_resp.json()
+        total_usage = usage_data.get("total_usage", 0) / 100  # cents to USD
+
+        # Remaining balance
+        remaining = hard_limit - total_usage
+        return max(remaining, 0.0)
+    except Exception:
+        return None
 
 # ---------- Sidebar ----------
 with st.sidebar:
@@ -59,35 +96,19 @@ with st.sidebar:
         height=80
     )
 
-    # --- Balance fetch (cached) ---
-    @st.cache_data(ttl=120)
-    def fetch_openai_balance(api_key: str):
-        try:
-            url = "https://api.openai.com/v1/dashboard/billing/credit_grants"
-            headers = {"Authorization": f"Bearer {api_key}"}
-            r = requests.get(url, headers=headers, timeout=10)
-            if r.status_code == 200:
-                data = r.json()
-                # total_available is remaining prepaid credit (USD)
-                return float(data.get("total_available", 0.0))
-            return None
-        except Exception:
-            return None
-
-    OPENAI_KEY = st.secrets.get("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY", ""))
-
+    # Balance display
     cols = st.columns((1, 1))
     with cols[0]:
         refresh_balance = st.button("🔄 Refresh balance")
     with cols[1]:
         show_balance = st.checkbox("Show balance", value=True)
 
-    balance_value = fetch_openai_balance(OPENAI_KEY) if show_balance else None
+    balance_value = fetch_openai_remaining(OPENAI_KEY) if show_balance else None
     if show_balance:
         if balance_value is None:
-            st.info("Balance: unavailable (pay-as-you-go accounts may show $0 or this endpoint may be blocked).")
+            st.info("Balance: unavailable (check API key or billing).")
         else:
-            st.success(f"Balance: **${balance_value:.2f}**")
+            st.success(f"Remaining monthly allowance: **${balance_value:.2f}**")
 
     # Download chat history
     if st.session_state.get("history"):
@@ -127,9 +148,6 @@ if uploaded:
     except Exception:
         file_context = ""
 
-# ---------- OpenAI client ----------
-client = openai.OpenAI(api_key=OPENAI_KEY)
-
 # ---------- Render chat history ----------
 for msg in st.session_state["history"]:
     if msg["role"] == "user":
@@ -145,10 +163,9 @@ for msg in st.session_state["history"]:
             cost = estimate_cost(msg.get("model",""), msg.get("input_tokens",0), msg.get("output_tokens",0))
             st.markdown(f"<span style='color:gray;font-size:12px'>{small} · est. cost: ${cost}</span>", unsafe_allow_html=True)
 
-# ---------- User input + call ----------
+# ---------- User input ----------
 prompt = st.chat_input("Type your message… (Shift+Enter for a new line)")
 if prompt:
-    # Append user message immediately
     st.session_state["history"].append({"role": "user", "content": prompt, "model": model})
     st.chat_message("user").markdown(prompt)
 
@@ -160,7 +177,6 @@ if prompt:
         messages.append({"role": "system", "content": f"Use this uploaded file as context:\n{file_context}"})
     messages.extend({"role": m["role"], "content": m["content"]} for m in st.session_state["history"])
 
-    # Call OpenAI
     try:
         with st.spinner("Thinking…"):
             resp = client.chat.completions.create(model=model, messages=messages)
@@ -168,7 +184,6 @@ if prompt:
         usage = resp.usage
         cost_this_message = estimate_cost(model, usage.prompt_tokens, usage.completion_tokens)
 
-        # Store assistant reply
         st.session_state["history"].append({
             "role": "assistant",
             "content": reply,
@@ -180,7 +195,7 @@ if prompt:
         st.session_state["token_total"] += usage.total_tokens
         st.session_state["cost_total"] += cost_this_message
 
-        # Update daily usage (persisted)
+        # Update daily usage file
         daily_usage[today_str] += cost_this_message
         save_daily_usage(daily_usage)
 
@@ -188,7 +203,7 @@ if prompt:
     except Exception as e:
         st.error(f"OpenAI error: {e}")
 
-# ---------- Totals (session + daily + optional balance) ----------
+# ---------- Totals ----------
 totals_line = (
     f"**Session tokens:** {st.session_state['token_total']} · "
     f"**Est. session cost:** ${round(st.session_state['cost_total'], 5)} · "
