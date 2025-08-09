@@ -44,41 +44,35 @@ def estimate_cost(model: str, in_tokens: int, out_tokens: int) -> float:
 OPENAI_KEY = st.secrets.get("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY", ""))
 client = openai.OpenAI(api_key=OPENAI_KEY)
 
-# ---------- Remaining balance function ----------
+# ---------- Remaining monthly allowance ----------
 @st.cache_data(ttl=120)
 def fetch_openai_remaining(api_key: str):
     try:
-        # Dates for current month usage
         today = date.today()
         start_date = today.replace(day=1).strftime("%Y-%m-%d")
         end_date = today.strftime("%Y-%m-%d")
 
-        # Get subscription details (monthly hard limit)
+        # Get subscription details
         sub_url = "https://api.openai.com/v1/dashboard/billing/subscription"
         headers = {"Authorization": f"Bearer {api_key}"}
         sub_resp = requests.get(sub_url, headers=headers, timeout=10)
         if sub_resp.status_code != 200:
             return None
-        sub_data = sub_resp.json()
-        hard_limit = sub_data.get("hard_limit_usd", 0.0)
+        hard_limit = sub_resp.json().get("hard_limit_usd", 0.0)
 
         # Get usage this month
         usage_url = f"https://api.openai.com/v1/dashboard/billing/usage?start_date={start_date}&end_date={end_date}"
         usage_resp = requests.get(usage_url, headers=headers, timeout=10)
         if usage_resp.status_code != 200:
             return None
-        usage_data = usage_resp.json()
-        total_usage = usage_data.get("total_usage", 0) / 100  # cents to USD
+        total_usage = usage_resp.json().get("total_usage", 0) / 100  # cents to USD
 
-        # Remaining balance
-        remaining = hard_limit - total_usage
-        return max(remaining, 0.0)
+        return max(hard_limit - total_usage, 0.0)
     except Exception:
         return None
 
 # ---------- Sidebar ----------
 with st.sidebar:
-    # Model selector
     MODEL_OPTIONS = {
         "GPT-5":            "gpt-5",
         "GPT-4o (default)": "gpt-4o",
@@ -89,14 +83,12 @@ with st.sidebar:
     model_label = st.selectbox("Model", list(MODEL_OPTIONS.keys()), index=1)
     model = MODEL_OPTIONS[model_label]
 
-    # Optional system prompt
     system_prompt = st.text_area(
         "System instructions (optional)",
         placeholder="E.g., You are a helpful assistant that answers concisely.",
         height=80
     )
 
-    # Balance display
     cols = st.columns((1, 1))
     with cols[0]:
         refresh_balance = st.button("🔄 Refresh balance")
@@ -110,7 +102,6 @@ with st.sidebar:
         else:
             st.success(f"Remaining monthly allowance: **${balance_value:.2f}**")
 
-    # Download chat history
     if st.session_state.get("history"):
         history_text = "\n\n".join(
             [f"You: {m['content']}" if m["role"] == "user" else f"AI: {m['content']}"
@@ -118,7 +109,6 @@ with st.sidebar:
         )
         st.download_button("⬇️ Download Chat History", data=history_text, file_name="chat_history.txt")
 
-    # Reset chat
     def reset_chat():
         st.session_state["history"] = []
         st.session_state["token_total"] = 0
@@ -133,8 +123,7 @@ if "token_total" not in st.session_state:
 if "cost_total" not in st.session_state:
     st.session_state["cost_total"] = 0.0
 
-# ---------- File upload ----------
-file_context = ""
+# ---------- File upload (auto-load into chat) ----------
 uploaded = st.file_uploader("Upload file (TXT, PY, CS, C, CPP)", type=["txt", "py", "cs", "c", "cpp"])
 if uploaded:
     try:
@@ -145,23 +134,27 @@ if uploaded:
             file_context = clipped + f"\n\n[NOTE: File clipped from {len(raw)} to {max_chars} characters]"
         else:
             file_context = raw
+
+        # Add system message with file content
+        st.session_state["history"].append({
+            "role": "system",
+            "content": f"File '{uploaded.name}' loaded. Content:\n\n{file_context}"
+        })
+        # Add confirmation message
+        st.session_state["history"].append({
+            "role": "assistant",
+            "content": f"✅ I have loaded the file **{uploaded.name}** into our conversation context."
+        })
     except Exception:
-        file_context = ""
+        st.error("❌ Could not read the uploaded file.")
 
 # ---------- Render chat history ----------
 for msg in st.session_state["history"]:
     if msg["role"] == "user":
         st.chat_message("user").markdown(msg["content"])
-    else:
+    elif msg["role"] == "assistant":
         st.chat_message("assistant").markdown(msg["content"])
-        if "total_tokens" in msg:
-            small = (
-                f"Tokens – in: {msg.get('input_tokens','?')}, "
-                f"out: {msg.get('output_tokens','?')}, "
-                f"total: {msg.get('total_tokens','?')}"
-            )
-            cost = estimate_cost(msg.get("model",""), msg.get("input_tokens",0), msg.get("output_tokens",0))
-            st.markdown(f"<span style='color:gray;font-size:12px'>{small} · est. cost: ${cost}</span>", unsafe_allow_html=True)
+    # Don't display raw system messages
 
 # ---------- User input ----------
 prompt = st.chat_input("Type your message… (Shift+Enter for a new line)")
@@ -169,13 +162,11 @@ if prompt:
     st.session_state["history"].append({"role": "user", "content": prompt, "model": model})
     st.chat_message("user").markdown(prompt)
 
-    # Build messages
+    # Build messages (include system messages and user/assistant turns)
     messages = []
     if system_prompt.strip():
         messages.append({"role": "system", "content": system_prompt.strip()})
-    if file_context:
-        messages.append({"role": "system", "content": f"Use this uploaded file as context:\n{file_context}"})
-    messages.extend({"role": m["role"], "content": m["content"]} for m in st.session_state["history"])
+    messages.extend({"role": m["role"], "content": m["content"]} for m in st.session_state["history"] if m["role"] != "assistant" or m.get("model"))
 
     try:
         with st.spinner("Thinking…"):
@@ -195,7 +186,6 @@ if prompt:
         st.session_state["token_total"] += usage.total_tokens
         st.session_state["cost_total"] += cost_this_message
 
-        # Update daily usage file
         daily_usage[today_str] += cost_this_message
         save_daily_usage(daily_usage)
 
