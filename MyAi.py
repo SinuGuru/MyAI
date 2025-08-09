@@ -24,7 +24,7 @@ if today_str not in daily_usage:
 
 # ---------- Page config ----------
 st.set_page_config(page_title="Chatbot", page_icon="💬", layout="centered")
-st.title("💬 ChatGPT Chatbot")
+st.title("💬 MyChatbot")
 
 # ---------- Pricing ----------
 PRICING = {
