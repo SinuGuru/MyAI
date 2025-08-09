@@ -24,8 +24,8 @@ if today_str not in daily_usage:
     daily_usage[today_str] = 0.0
 
 # ---------- Page config ----------
-st.set_page_config(page_title="Chatbot", page_icon="💬", layout="centered")
-st.title("💬 ChatGPT Chatbot")
+st.set_page_config(page_title="My Chatbot", page_icon="💬", layout="centered")
+st.title("💬 My Chatbot")
 
 # ---------- Pricing ----------
 PRICING = {
@@ -52,7 +52,6 @@ def fetch_openai_remaining(api_key: str):
         start_date = today.replace(day=1).strftime("%Y-%m-%d")
         end_date = today.strftime("%Y-%m-%d")
 
-        # Get subscription details
         sub_url = "https://api.openai.com/v1/dashboard/billing/subscription"
         headers = {"Authorization": f"Bearer {api_key}"}
         sub_resp = requests.get(sub_url, headers=headers, timeout=10)
@@ -60,12 +59,11 @@ def fetch_openai_remaining(api_key: str):
             return None
         hard_limit = sub_resp.json().get("hard_limit_usd", 0.0)
 
-        # Get usage this month
         usage_url = f"https://api.openai.com/v1/dashboard/billing/usage?start_date={start_date}&end_date={end_date}"
         usage_resp = requests.get(usage_url, headers=headers, timeout=10)
         if usage_resp.status_code != 200:
             return None
-        total_usage = usage_resp.json().get("total_usage", 0) / 100  # cents to USD
+        total_usage = usage_resp.json().get("total_usage", 0) / 100
 
         return max(hard_limit - total_usage, 0.0)
     except Exception:
@@ -123,28 +121,35 @@ if "token_total" not in st.session_state:
 if "cost_total" not in st.session_state:
     st.session_state["cost_total"] = 0.0
 
-# ---------- File upload (auto-load into chat) ----------
-uploaded = st.file_uploader("Upload file (TXT, PY, CS, C, CPP)", type=["txt", "py", "cs", "c", "cpp"])
+# ---------- File upload (auto-load + download) ----------
+uploaded = st.file_uploader("Upload file (any type)", type=None)
 if uploaded:
     try:
-        raw = uploaded.read().decode("utf-8", errors="ignore")
-        max_chars = 30_000
-        if len(raw) > max_chars:
-            clipped = raw[:max_chars]
-            file_context = clipped + f"\n\n[NOTE: File clipped from {len(raw)} to {max_chars} characters]"
-        else:
-            file_context = raw
+        raw = uploaded.read()
+        try:
+            # Try decoding for text formats
+            raw_decoded = raw.decode("utf-8", errors="ignore")
+            file_context = raw_decoded
+        except Exception:
+            file_context = "[Binary file uploaded]"
 
-        # Add system message with file content
         st.session_state["history"].append({
             "role": "system",
             "content": f"File '{uploaded.name}' loaded. Content:\n\n{file_context}"
         })
-        # Add confirmation message
         st.session_state["history"].append({
             "role": "assistant",
             "content": f"✅ I have loaded the file **{uploaded.name}** into our conversation context."
         })
+
+        # Allow re-downloading in original format
+        st.download_button(
+            label="⬇️ Download Uploaded File",
+            data=raw,
+            file_name=uploaded.name,
+            mime="application/octet-stream"
+        )
+
     except Exception:
         st.error("❌ Could not read the uploaded file.")
 
@@ -154,7 +159,6 @@ for msg in st.session_state["history"]:
         st.chat_message("user").markdown(msg["content"])
     elif msg["role"] == "assistant":
         st.chat_message("assistant").markdown(msg["content"])
-    # Don't display raw system messages
 
 # ---------- User input ----------
 prompt = st.chat_input("Type your message… (Shift+Enter for a new line)")
@@ -162,7 +166,6 @@ if prompt:
     st.session_state["history"].append({"role": "user", "content": prompt, "model": model})
     st.chat_message("user").markdown(prompt)
 
-    # Build messages (include system messages and user/assistant turns)
     messages = []
     if system_prompt.strip():
         messages.append({"role": "system", "content": system_prompt.strip()})
@@ -190,6 +193,15 @@ if prompt:
         save_daily_usage(daily_usage)
 
         st.chat_message("assistant").markdown(reply)
+
+        # Download AI output as text
+        st.download_button(
+            label="⬇️ Download AI Output",
+            data=reply.encode("utf-8"),
+            file_name="ai_output.txt",
+            mime="text/plain"
+        )
+
     except Exception as e:
         st.error(f"OpenAI error: {e}")
 
