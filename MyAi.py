@@ -1,5 +1,6 @@
 import os
 import json
+import requests
 from datetime import date
 import streamlit as st
 import openai
@@ -24,11 +25,11 @@ if today_str not in daily_usage:
 
 # ---------- Page config ----------
 st.set_page_config(page_title="Chatbot", page_icon="💬", layout="centered")
-st.title("💬 MyChatbot")
+st.title("💬 ChatGPT Chatbot")
 
 # ---------- Pricing ----------
 PRICING = {
-    "gpt-5":              {"input": 0.02,   "output": 0.06},    # placeholder pricing
+    "gpt-5":              {"input": 0.02,   "output": 0.06},    # placeholder pricing (adjust if needed)
     "gpt-4o":             {"input": 0.0005, "output": 0.0015},
     "gpt-4-turbo":        {"input": 0.01,   "output": 0.03},
     "gpt-4-1106-preview": {"input": 0.01,   "output": 0.03},
@@ -40,6 +41,7 @@ def estimate_cost(model: str, in_tokens: int, out_tokens: int) -> float:
 
 # ---------- Sidebar ----------
 with st.sidebar:
+    # Model selector
     MODEL_OPTIONS = {
         "GPT-5":            "gpt-5",
         "GPT-4o (default)": "gpt-4o",
@@ -50,12 +52,44 @@ with st.sidebar:
     model_label = st.selectbox("Model", list(MODEL_OPTIONS.keys()), index=1)
     model = MODEL_OPTIONS[model_label]
 
+    # Optional system prompt
     system_prompt = st.text_area(
         "System instructions (optional)",
         placeholder="E.g., You are a helpful assistant that answers concisely.",
         height=80
     )
 
+    # --- Balance fetch (cached) ---
+    @st.cache_data(ttl=120)
+    def fetch_openai_balance(api_key: str):
+        try:
+            url = "https://api.openai.com/v1/dashboard/billing/credit_grants"
+            headers = {"Authorization": f"Bearer {api_key}"}
+            r = requests.get(url, headers=headers, timeout=10)
+            if r.status_code == 200:
+                data = r.json()
+                # total_available is remaining prepaid credit (USD)
+                return float(data.get("total_available", 0.0))
+            return None
+        except Exception:
+            return None
+
+    OPENAI_KEY = st.secrets.get("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY", ""))
+
+    cols = st.columns((1, 1))
+    with cols[0]:
+        refresh_balance = st.button("🔄 Refresh balance")
+    with cols[1]:
+        show_balance = st.checkbox("Show balance", value=True)
+
+    balance_value = fetch_openai_balance(OPENAI_KEY) if show_balance else None
+    if show_balance:
+        if balance_value is None:
+            st.info("Balance: unavailable (pay-as-you-go accounts may show $0 or this endpoint may be blocked).")
+        else:
+            st.success(f"Balance: **${balance_value:.2f}**")
+
+    # Download chat history
     if st.session_state.get("history"):
         history_text = "\n\n".join(
             [f"You: {m['content']}" if m["role"] == "user" else f"AI: {m['content']}"
@@ -63,6 +97,7 @@ with st.sidebar:
         )
         st.download_button("⬇️ Download Chat History", data=history_text, file_name="chat_history.txt")
 
+    # Reset chat
     def reset_chat():
         st.session_state["history"] = []
         st.session_state["token_total"] = 0
@@ -93,7 +128,7 @@ if uploaded:
         file_context = ""
 
 # ---------- OpenAI client ----------
-client = openai.OpenAI(api_key=st.secrets.get("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY", "")))
+client = openai.OpenAI(api_key=OPENAI_KEY)
 
 # ---------- Render chat history ----------
 for msg in st.session_state["history"]:
@@ -110,12 +145,14 @@ for msg in st.session_state["history"]:
             cost = estimate_cost(msg.get("model",""), msg.get("input_tokens",0), msg.get("output_tokens",0))
             st.markdown(f"<span style='color:gray;font-size:12px'>{small} · est. cost: ${cost}</span>", unsafe_allow_html=True)
 
-# ---------- User input ----------
+# ---------- User input + call ----------
 prompt = st.chat_input("Type your message… (Shift+Enter for a new line)")
 if prompt:
+    # Append user message immediately
     st.session_state["history"].append({"role": "user", "content": prompt, "model": model})
     st.chat_message("user").markdown(prompt)
 
+    # Build messages
     messages = []
     if system_prompt.strip():
         messages.append({"role": "system", "content": system_prompt.strip()})
@@ -123,14 +160,15 @@ if prompt:
         messages.append({"role": "system", "content": f"Use this uploaded file as context:\n{file_context}"})
     messages.extend({"role": m["role"], "content": m["content"]} for m in st.session_state["history"])
 
+    # Call OpenAI
     try:
         with st.spinner("Thinking…"):
             resp = client.chat.completions.create(model=model, messages=messages)
         reply = resp.choices[0].message.content
         usage = resp.usage
-
         cost_this_message = estimate_cost(model, usage.prompt_tokens, usage.completion_tokens)
 
+        # Store assistant reply
         st.session_state["history"].append({
             "role": "assistant",
             "content": reply,
@@ -142,7 +180,7 @@ if prompt:
         st.session_state["token_total"] += usage.total_tokens
         st.session_state["cost_total"] += cost_this_message
 
-        # Update daily usage
+        # Update daily usage (persisted)
         daily_usage[today_str] += cost_this_message
         save_daily_usage(daily_usage)
 
@@ -150,9 +188,15 @@ if prompt:
     except Exception as e:
         st.error(f"OpenAI error: {e}")
 
-# ---------- Totals ----------
-st.markdown(
-    f"---\n**Session tokens:** {st.session_state['token_total']} · "
+# ---------- Totals (session + daily + optional balance) ----------
+totals_line = (
+    f"**Session tokens:** {st.session_state['token_total']} · "
     f"**Est. session cost:** ${round(st.session_state['cost_total'], 5)} · "
     f"**Today’s total cost:** ${round(daily_usage[today_str], 5)}"
 )
+if show_balance:
+    if balance_value is None:
+        totals_line += " · **Balance:** n/a"
+    else:
+        totals_line += f" · **Balance:** ${balance_value:.2f}"
+st.markdown("---\n" + totals_line)
