@@ -1,20 +1,42 @@
+import os
 import streamlit as st
 import openai
 
+# ---------- Page config ----------
 st.set_page_config(page_title="Chatbot", page_icon="💬", layout="centered")
 st.title("💬 ChatGPT Chatbot")
 
-# --- Sidebar: Model Selector + Download ---
+# ---------- Pricing ----------
+PRICING = {
+    "gpt-5":              {"input": 0.02,   "output": 0.06},    # placeholder pricing
+    "gpt-4o":             {"input": 0.0005, "output": 0.0015},
+    "gpt-4-turbo":        {"input": 0.01,   "output": 0.03},
+    "gpt-4-1106-preview": {"input": 0.01,   "output": 0.03},
+    "gpt-3.5-turbo":      {"input": 0.0005, "output": 0.0015},
+}
+def estimate_cost(model: str, in_tokens: int, out_tokens: int) -> float:
+    p = PRICING.get(model, {"input": 0.0, "output": 0.0})
+    return round((in_tokens / 1000) * p["input"] + (out_tokens / 1000) * p["output"], 5)
+
+# ---------- Sidebar ----------
 with st.sidebar:
     MODEL_OPTIONS = {
-        "GPT-3.5 Turbo": "gpt-3.5-turbo",
-        "GPT-4o": "gpt-4o",
-        "GPT-4 Turbo": "gpt-4-turbo",
-        "GPT-4.1": "gpt-4-1106-preview"
+        "GPT-5":            "gpt-5",
+        "GPT-4o (default)": "gpt-4o",
+        "GPT-4 Turbo":      "gpt-4-turbo",
+        "GPT-4.1":          "gpt-4-1106-preview",
+        "GPT-3.5 Turbo":    "gpt-3.5-turbo",
     }
-    model_label = st.selectbox("Choose model", list(MODEL_OPTIONS.keys()), index=1)
+    model_label = st.selectbox("Model", list(MODEL_OPTIONS.keys()), index=1)
     model = MODEL_OPTIONS[model_label]
 
+    system_prompt = st.text_area(
+        "System instructions (optional)",
+        placeholder="E.g., You are a helpful assistant that answers concisely.",
+        height=80
+    )
+
+    # Download chat history
     if st.session_state.get("history"):
         history_text = "\n\n".join(
             [f"You: {m['content']}" if m["role"] == "user" else f"AI: {m['content']}"
@@ -22,91 +44,63 @@ with st.sidebar:
         )
         st.download_button("⬇️ Download Chat History", data=history_text, file_name="chat_history.txt")
 
-# --- Pricing ---
-PRICING = {
-    "gpt-3.5-turbo": {"input": 0.0005, "output": 0.0015},
-    "gpt-4o": {"input": 0.0005, "output": 0.0015},
-    "gpt-4-turbo": {"input": 0.01, "output": 0.03},
-    "gpt-4-1106-preview": {"input": 0.01, "output": 0.03}
-}
-def estimate_cost(model, input_tokens, output_tokens):
-    p = PRICING.get(model, {"input": 0, "output": 0})
-    return round((input_tokens / 1000) * p["input"] + (output_tokens / 1000) * p["output"], 5)
+    # Reset chat
+    def reset_chat():
+        st.session_state["history"] = []
+        st.session_state["token_total"] = 0
+        st.session_state["cost_total"] = 0.0
+    st.button("🔁 Reset Chat", on_click=reset_chat)
 
-# --- Init session ---
+# ---------- Session state ----------
 if "history" not in st.session_state:
     st.session_state["history"] = []
 if "token_total" not in st.session_state:
     st.session_state["token_total"] = 0
-if "input_value" not in st.session_state:
-    st.session_state["input_value"] = ""
+if "cost_total" not in st.session_state:
+    st.session_state["cost_total"] = 0.0
 
-# --- File Upload (code/text) ---
-file_content = ""
-uploaded_file = st.file_uploader("Upload file (TXT, PY, CS, C, CPP)", type=["txt", "py", "cs", "c", "cpp"])
-if uploaded_file:
+# ---------- File upload ----------
+file_context = ""
+uploaded = st.file_uploader("Upload file (TXT, PY, CS, C, CPP)", type=["txt", "py", "cs", "c", "cpp"])
+if uploaded:
     try:
-        file_content = uploaded_file.read().decode("utf-8", errors="ignore")
+        raw = uploaded.read().decode("utf-8", errors="ignore")
+        max_chars = 30_000
+        if len(raw) > max_chars:
+            clipped = raw[:max_chars]
+            file_context = clipped + f"\n\n[NOTE: File clipped from {len(raw)} to {max_chars} characters]"
+        else:
+            file_context = raw
     except Exception:
-        file_content = ""
+        file_context = ""
 
-# --- Show chat history ---
-for entry in st.session_state["history"]:
-    if entry["role"] == "user":
-        st.markdown(f"**You:** {entry['content']}")
-    else:
-        tokens_info = f"Input: {entry.get('input_tokens', '?')}, Output: {entry.get('output_tokens', '?')}, Total: {entry.get('total_tokens', '?')}"
-        cost = estimate_cost(entry.get("model", ""), entry.get("input_tokens", 0), entry.get("output_tokens", 0))
-        st.markdown(
-            f"**AI ({entry['model']}):** {entry['content']}\n"
-            f"<span style='color:gray;font-size:small;'>Tokens – {tokens_info}<br>Estimated Cost: ${cost}</span>",
-            unsafe_allow_html=True
-        )
-st.markdown(f"---\n**Total Tokens Used:** {st.session_state['token_total']}")
+# ---------- OpenAI client ----------
+client = openai.OpenAI(api_key=st.secrets.get("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY", "")))
 
-# --- Reset Chat ---
-def reset_chat():
-    st.session_state["history"] = []
-    st.session_state["token_total"] = 0
-    st.session_state["input_value"] = ""
-st.button("🔁 Reset Chat", on_click=reset_chat)
-
-# --- Dynamic expanding message box ---
-message_html = f"""
-<textarea id="dynamic-input" name="message" placeholder="Type your message..." 
-style="width:100%; min-height:40px; resize:none; overflow:hidden; padding:8px; font-size:16px;">{st.session_state['input_value']}</textarea>
-<script>
-const ta = document.getElementById('dynamic-input');
-ta.addEventListener('input', () => {{
-    ta.style.height = 'auto';
-    ta.style.height = (ta.scrollHeight) + 'px';
-}});
-</script>
-"""
-st.markdown(message_html, unsafe_allow_html=True)
-
-# Capture message from frontend
-msg = st.session_state["input_value"]
-
-# --- Send Button ---
-send = st.button("Send")
-
-# --- Function to talk to OpenAI ---
-def chat_with_openai(prompt, chat_history, model):
-    messages = [{"role": e["role"], "content": e["content"]} for e in chat_history]
-    if file_content:
-        messages.insert(0, {"role": "system", "content": f"Use this uploaded file as context:\n{file_content}"})
+# ---------- User input ----------
+prompt = st.chat_input("Type your message… (Shift+Enter for a new line)")
+if prompt:
+    # Build messages
+    messages = []
+    if system_prompt.strip():
+        messages.append({"role": "system", "content": system_prompt.strip()})
+    if file_context:
+        messages.append({"role": "system", "content": f"Use this uploaded file as context:\n{file_context}"})
+    messages.extend({"role": m["role"], "content": m["content"]} for m in st.session_state["history"])
     messages.append({"role": "user", "content": prompt})
-    resp = openai.OpenAI(api_key=st.secrets["OPENAI_API_KEY"]).chat.completions.create(model=model, messages=messages)
-    return resp.choices[0].message.content, resp.usage
 
-# --- Handle sending ---
-if send:
-    msg = st.session_state["input_value"] = st.session_state["input_value"].strip()
-    if msg:
-        st.session_state["history"].append({"role": "user", "content": msg, "model": model})
-        with st.spinner("Thinking..."):
-            reply, usage = chat_with_openai(msg, st.session_state["history"], model)
+    # Display user message immediately
+    st.session_state["history"].append({"role": "user", "content": prompt, "model": model})
+    st.chat_message("user").markdown(prompt)
+
+    # Call OpenAI
+    try:
+        with st.spinner("Thinking…"):
+            resp = client.chat.completions.create(model=model, messages=messages)
+        reply = resp.choices[0].message.content
+        usage = resp.usage
+
+        # Store assistant reply
         st.session_state["history"].append({
             "role": "assistant",
             "content": reply,
@@ -116,5 +110,29 @@ if send:
             "total_tokens": usage.total_tokens
         })
         st.session_state["token_total"] += usage.total_tokens
-        st.session_state["input_value"] = ""  # clear after send
-        st.experimental_rerun()  # refresh to show AI response immediately
+        st.session_state["cost_total"] += estimate_cost(model, usage.prompt_tokens, usage.completion_tokens)
+
+        st.chat_message("assistant").markdown(reply)
+    except Exception as e:
+        st.error(f"OpenAI error: {e}")
+
+# ---------- Render history ----------
+for msg in st.session_state["history"]:
+    if msg["role"] == "user":
+        st.chat_message("user").markdown(msg["content"])
+    else:
+        st.chat_message("assistant").markdown(msg["content"])
+        if "total_tokens" in msg:
+            small = (
+                f"Tokens – in: {msg.get('input_tokens','?')}, "
+                f"out: {msg.get('output_tokens','?')}, "
+                f"total: {msg.get('total_tokens','?')}"
+            )
+            cost = estimate_cost(msg.get("model",""), msg.get("input_tokens",0), msg.get("output_tokens",0))
+            st.markdown(f"<span style='color:gray;font-size:12px'>{small} · est. cost: ${cost}</span>", unsafe_allow_html=True)
+
+# ---------- Totals ----------
+st.markdown(
+    f"---\n**Session tokens:** {st.session_state['token_total']} · "
+    f"**Est. session cost:** ${round(st.session_state['cost_total'], 5)}"
+)
